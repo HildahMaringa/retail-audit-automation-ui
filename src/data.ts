@@ -19,65 +19,6 @@ export const posCoolerProjects = [
   'TZ-MRA',
 ]
 
-export const runHistory: RunRecord[] = [
-  {
-    id: 'RA-2026-014',
-    title: 'NG-MRA Data Queries',
-    family: 'Data Queries',
-    project: 'NG-MRA',
-    action: 'Run Queries',
-    batch: 'Batch 3',
-    status: 'Success',
-    duration: '2m 18s',
-    files: 2,
-    date: 'Jun 08, 2026 09:42',
-  },
-  {
-    id: 'RA-2026-013',
-    title: 'Nigeria-Ville Correct Feedback',
-    family: 'Data Queries',
-    project: 'Nigeria-Ville',
-    action: 'Correct Feedback',
-    batch: 'Batch 2',
-    status: 'Success',
-    duration: '3m 04s',
-    files: 2,
-    date: 'Jun 08, 2026 08:15',
-  },
-  {
-    id: 'RA-2026-012',
-    title: 'KO-Uganda POS & Cooler Queries',
-    family: 'POS and Cooler Queries',
-    project: 'KO-Uganda',
-    action: 'Run Queries',
-    batch: 'Batch 1',
-    status: 'Failed',
-    duration: '48s',
-    files: 0,
-    date: 'Jun 07, 2026 16:30',
-  },
-  {
-    id: 'RA-2026-011',
-    title: 'Usafi-Uganda Merge Feedback',
-    family: 'Data Queries',
-    project: 'Usafi-Uganda',
-    action: 'Merge Feedback',
-    batch: 'Batch 1-3',
-    status: 'Success',
-    duration: '1m 37s',
-    files: 1,
-    date: 'Jun 07, 2026 13:12',
-  },
-  {
-    id: 'RA-2026-010',
-    title: 'Pewa Data Queries',
-    family: 'Data Queries',
-    project: 'Pewa',
-    action: 'Run Queries',
-    batch: 'Batch 4',
-    status: 'Running',
-    duration: '1m 05s',
-    files: 0,
-    date: 'Jun 07, 2026 11:05',
-  },
-]
+// No mock/demo runs.
+// Real run history will be connected later from the backend.
+export const runHistory: RunRecord[] = []

@@ -38,7 +38,9 @@ export function AppLayout({ activePage, onNavigate, children }: Props) {
         <div className="mt-8 rounded-3xl p-5 glass-card">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/60">Automation Suite</p>
           <h1 className="mt-3 text-2xl font-black leading-tight">Retail Audit Automation</h1>
-          <p className="mt-3 text-sm leading-6 text-white/70">Run queries, correct feedback, merge batches, and download clean output workbooks.</p>
+          <p className="mt-3 text-sm leading-6 text-white/70">
+            Run queries, correct feedback, merge batches, and download clean output workbooks.
+          </p>
         </div>
 
         <nav className="mt-8 space-y-2">
@@ -78,10 +80,14 @@ export function AppLayout({ activePage, onNavigate, children }: Props) {
                 <p className="text-xs font-semibold text-slate-500">Retail Audit Automation</p>
               </div>
             </div>
+
             <div className="hidden lg:block">
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">KANTAR Retail Audit Automation</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
+                KANTAR Retail Audit Automation
+              </p>
               <h2 className="text-2xl font-black text-kantar-ink">{pageTitles[activePage]}</h2>
             </div>
+
             <div className="flex items-center gap-2">
               <button className="hidden rounded-2xl border border-slate-200 bg-white p-3 text-slate-600 shadow-sm hover:border-kantar-blue hover:text-kantar-blue sm:block">
                 <Search className="h-5 w-5" />
@@ -89,7 +95,6 @@ export function AppLayout({ activePage, onNavigate, children }: Props) {
               <button className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-600 shadow-sm hover:border-kantar-blue hover:text-kantar-blue">
                 <Bell className="h-5 w-5" />
               </button>
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-kantar-blue to-kantar-purple text-sm font-black text-white shadow-card">PO</div>
             </div>
           </div>
         </header>
