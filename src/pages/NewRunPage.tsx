@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import type { MouseEvent } from 'react'
 import {
   AlertCircle,
   Check,
@@ -26,8 +27,10 @@ type RunResult = {
   run_id: string
   status: string
   message: string
-  output_file: string
-  download_url: string
+  output_file?: string
+  download_url?: string
+  status_url?: string
+  error?: string
 }
 
 type FilePickerProps = {
@@ -51,7 +54,7 @@ function FilePicker({
 }: FilePickerProps) {
   const selectedFiles = multiple ? files : file ? [file] : []
 
-  function clearFiles(event: React.MouseEvent<HTMLButtonElement>) {
+  function clearFiles(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault()
     event.stopPropagation()
 
@@ -157,26 +160,26 @@ export function NewRunPage() {
     setRunError('')
     setRunResult(null)
 
-    const primaryFile = action === 'Merge Feedback' ? queryFiles[0] : dataFile
-    const optionalFeedbackFile =
-      action === 'Merge Feedback'
-        ? feedbackFiles[0]
-        : action === 'Correct Feedback'
-          ? feedbackFile
-          : previousFeedbackFile
+    if (action === 'Merge Feedback') {
+      if (queryFiles.length === 0) {
+        setRunError('Please upload at least one query file before running merge feedback.')
+        return
+      }
 
-    if (!primaryFile) {
-      setRunError(
-        action === 'Merge Feedback'
-          ? 'Please upload at least one query file before running.'
-          : 'Please upload the data workbook before running.'
-      )
-      return
-    }
+      if (feedbackFiles.length === 0) {
+        setRunError('Please upload at least one feedback file before running merge feedback.')
+        return
+      }
+    } else {
+      if (!dataFile) {
+        setRunError('Please upload the data workbook before running.')
+        return
+      }
 
-    if (action === 'Correct Feedback' && !optionalFeedbackFile) {
-      setRunError('Please upload the feedback workbook before running correction.')
-      return
+      if (action === 'Correct Feedback' && !feedbackFile) {
+        setRunError('Please upload the feedback workbook before running correction.')
+        return
+      }
     }
 
     try {
@@ -189,10 +192,25 @@ export function NewRunPage() {
       formData.append('month', month)
       formData.append('year', year)
       formData.append('batch', batch.replace(/batch/i, '').trim() || batch)
-      formData.append('data_file', primaryFile)
 
-      if (optionalFeedbackFile) {
-        formData.append('feedback_file', optionalFeedbackFile)
+      if (action === 'Merge Feedback') {
+        queryFiles.forEach((file) => {
+          formData.append('query_files', file)
+        })
+
+        feedbackFiles.forEach((file) => {
+          formData.append('feedback_files', file)
+        })
+      } else {
+        if (dataFile) {
+          formData.append('data_file', dataFile)
+        }
+
+        const optionalFeedbackFile = action === 'Correct Feedback' ? feedbackFile : previousFeedbackFile
+
+        if (optionalFeedbackFile) {
+          formData.append('feedback_file', optionalFeedbackFile)
+        }
       }
 
       const response = await fetch(`${API_BASE_URL}/api/runs`, {
@@ -200,13 +218,46 @@ export function NewRunPage() {
         body: formData,
       })
 
-      const result = await response.json()
+      const initialResult: RunResult = await response.json()
 
-      if (!response.ok || result.status === 'error') {
-        throw new Error(result.message || 'The backend failed to process this run.')
+      if (!response.ok || initialResult.status === 'error' || initialResult.status === 'failed') {
+        throw new Error(initialResult.message || initialResult.error || 'The backend failed to start this run.')
       }
 
-      setRunResult(result)
+      if (!initialResult.run_id) {
+        throw new Error('The backend did not return a run ID.')
+      }
+
+      const statusUrl = initialResult.status_url || `/api/runs/${initialResult.run_id}/status`
+      const maxAttempts = 240 // 20 minutes total because 240 * 5 seconds = 20 minutes
+
+      let completedResult: RunResult | null = null
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5000))
+
+        const statusResponse = await fetch(`${API_BASE_URL}${statusUrl}`)
+        const statusResult: RunResult = await statusResponse.json()
+
+        if (!statusResponse.ok) {
+          throw new Error(statusResult.message || 'Could not check run status.')
+        }
+
+        if (statusResult.status === 'success') {
+          completedResult = statusResult
+          break
+        }
+
+        if (statusResult.status === 'failed' || statusResult.status === 'error') {
+          throw new Error(statusResult.error || statusResult.message || 'The backend failed to process this run.')
+        }
+      }
+
+      if (!completedResult) {
+        throw new Error('The run is taking too long. Please check the backend logs or try again later.')
+      }
+
+      setRunResult(completedResult)
       setStep(6)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Something went wrong while running the process.'
@@ -264,8 +315,16 @@ export function NewRunPage() {
             <p className="mt-2 text-slate-500">Choose the query family first. The next steps will adapt based on your selection.</p>
             <div className="mt-6 grid gap-4 lg:grid-cols-2">
               {[
-                { title: 'Data Queries' as QueryFamily, icon: Database, description: 'Run monthly checks for stock, purchases, prices, negative sales, profit checks, and project-specific rules.' },
-                { title: 'POS and Cooler Queries' as QueryFamily, icon: Refrigerator, description: 'Run POS and cooler validation for outlet assets, branded coolers, signage, shop signs, chairs, and tables.' },
+                {
+                  title: 'Data Queries' as QueryFamily,
+                  icon: Database,
+                  description: 'Run monthly checks for stock, purchases, prices, negative sales, profit checks, and project-specific rules.',
+                },
+                {
+                  title: 'POS and Cooler Queries' as QueryFamily,
+                  icon: Refrigerator,
+                  description: 'Run POS and cooler validation for outlet assets, branded coolers, signage, shop signs, chairs, and tables.',
+                },
               ].map((item) => {
                 const Icon = item.icon
                 const selected = family === item.title
@@ -276,7 +335,9 @@ export function NewRunPage() {
                       setFamily(item.title)
                       setProject(item.title === 'Data Queries' ? dataQueryProjects[0] : posCoolerProjects[0])
                     }}
-                    className={`rounded-3xl border p-6 text-left transition hover:-translate-y-0.5 ${selected ? 'border-kantar-blue bg-blue-50/70 shadow-card ring-4 ring-blue-100' : 'border-slate-200 bg-white hover:border-kantar-blue'}`}
+                    className={`rounded-3xl border p-6 text-left transition hover:-translate-y-0.5 ${
+                      selected ? 'border-kantar-blue bg-blue-50/70 shadow-card ring-4 ring-blue-100' : 'border-slate-200 bg-white hover:border-kantar-blue'
+                    }`}
                   >
                     <div className={`flex h-14 w-14 items-center justify-center rounded-2xl ${selected ? 'bg-kantar-blue text-white' : 'bg-slate-100 text-slate-600'}`}>
                       <Icon className="h-7 w-7" />
@@ -299,7 +360,9 @@ export function NewRunPage() {
                 <button
                   key={item}
                   onClick={() => setProject(item)}
-                  className={`rounded-3xl border p-5 text-left transition ${project === item ? 'border-kantar-blue bg-blue-50 text-kantar-blue ring-4 ring-blue-100' : 'border-slate-200 bg-white text-kantar-ink hover:border-kantar-blue'}`}
+                  className={`rounded-3xl border p-5 text-left transition ${
+                    project === item ? 'border-kantar-blue bg-blue-50 text-kantar-blue ring-4 ring-blue-100' : 'border-slate-200 bg-white text-kantar-ink hover:border-kantar-blue'
+                  }`}
                 >
                   <p className="text-lg font-black">{item}</p>
                   <p className="mt-2 text-sm text-slate-500">Project-specific configuration</p>
@@ -317,12 +380,19 @@ export function NewRunPage() {
               {actions.map((item) => {
                 const selected = action === item
                 const Icon = item === 'Run Queries' ? Play : item === 'Correct Feedback' ? FileCheck2 : Merge
-                const desc = item === 'Run Queries' ? 'Generate query files from the selected data workbook.' : item === 'Correct Feedback' ? 'Apply field feedback corrections and create corrected outputs.' : 'Merge multiple batch feedback files into one final workbook.'
+                const desc =
+                  item === 'Run Queries'
+                    ? 'Generate query files from the selected data workbook.'
+                    : item === 'Correct Feedback'
+                      ? 'Apply field feedback corrections and create corrected outputs.'
+                      : 'Merge multiple batch feedback files into one final workbook.'
                 return (
                   <button
                     key={item}
                     onClick={() => setAction(item)}
-                    className={`rounded-3xl border p-6 text-left transition ${selected ? 'border-kantar-blue bg-blue-50 ring-4 ring-blue-100' : 'border-slate-200 bg-white hover:border-kantar-blue'}`}
+                    className={`rounded-3xl border p-6 text-left transition ${
+                      selected ? 'border-kantar-blue bg-blue-50 ring-4 ring-blue-100' : 'border-slate-200 bg-white hover:border-kantar-blue'
+                    }`}
                   >
                     <div className={`flex h-12 w-12 items-center justify-center rounded-2xl ${selected ? 'bg-kantar-blue text-white' : 'bg-slate-100 text-slate-600'}`}>
                       <Icon className="h-6 w-6" />
@@ -346,21 +416,37 @@ export function NewRunPage() {
             <div className="grid gap-4 lg:grid-cols-3">
               <label className="space-y-2">
                 <span className="text-sm font-bold text-slate-600">Month</span>
-                <select value={month} onChange={(event) => setMonth(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 font-semibold outline-none focus:border-kantar-blue focus:ring-4 focus:ring-blue-100">
-                  {months.map((item) => <option key={item}>{item}</option>)}
+                <select
+                  value={month}
+                  onChange={(event) => setMonth(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 font-semibold outline-none focus:border-kantar-blue focus:ring-4 focus:ring-blue-100"
+                >
+                  {months.map((item) => (
+                    <option key={item}>{item}</option>
+                  ))}
                 </select>
               </label>
 
               <label className="space-y-2">
                 <span className="text-sm font-bold text-slate-600">Year</span>
-                <select value={year} onChange={(event) => setYear(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 font-semibold outline-none focus:border-kantar-blue focus:ring-4 focus:ring-blue-100">
-                  {['2026', '2025', '2024'].map((item) => <option key={item}>{item}</option>)}
+                <select
+                  value={year}
+                  onChange={(event) => setYear(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 font-semibold outline-none focus:border-kantar-blue focus:ring-4 focus:ring-blue-100"
+                >
+                  {['2026', '2025', '2024'].map((item) => (
+                    <option key={item}>{item}</option>
+                  ))}
                 </select>
               </label>
 
               <label className="space-y-2">
                 <span className="text-sm font-bold text-slate-600">Batch Number</span>
-                <input value={batch} onChange={(event) => setBatch(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 font-semibold outline-none focus:border-kantar-blue focus:ring-4 focus:ring-blue-100" />
+                <input
+                  value={batch}
+                  onChange={(event) => setBatch(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 font-semibold outline-none focus:border-kantar-blue focus:ring-4 focus:ring-blue-100"
+                />
               </label>
             </div>
 
@@ -403,14 +489,14 @@ export function NewRunPage() {
                 <>
                   <FilePicker
                     label="Upload Query Files"
-                    description="Query files for selected batches. For this first backend test, the first selected file will be sent."
+                    description="Upload all query files for the selected batches. Example: Batch 1, Batch 2, Batch 3."
                     multiple
                     files={queryFiles}
                     onMultipleChange={setQueryFiles}
                   />
                   <FilePicker
                     label="Upload Feedback Files"
-                    description="Feedback files for selected batches. For this first backend test, the first selected file will be sent."
+                    description="Upload all feedback files for the selected batches. Example: Batch 1, Batch 2, Batch 3."
                     multiple
                     files={feedbackFiles}
                     onMultipleChange={setFeedbackFiles}
@@ -463,7 +549,7 @@ export function NewRunPage() {
               className="mt-6 flex w-full items-center justify-center gap-3 rounded-3xl bg-kantar-blue px-6 py-5 text-lg font-black text-white shadow-card hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {isRunning ? <Loader2 className="h-6 w-6 animate-spin" /> : <Play className="h-6 w-6" />}
-              {isRunning ? 'Running Process...' : 'Run Process'}
+              {isRunning ? 'Processing... This may take a few minutes' : 'Run Process'}
             </button>
           </section>
         )}
@@ -504,7 +590,10 @@ export function NewRunPage() {
                 Download Output
               </button>
 
-              <button onClick={startNewRun} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-6 py-4 font-black text-kantar-ink hover:border-kantar-blue hover:text-kantar-blue">
+              <button
+                onClick={startNewRun}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-6 py-4 font-black text-kantar-ink hover:border-kantar-blue hover:text-kantar-blue"
+              >
                 <RotateCcw className="h-5 w-5" />
                 Start New Run
               </button>
@@ -522,8 +611,16 @@ export function NewRunPage() {
 
       {step < 5 && (
         <div className="flex items-center justify-between gap-3">
-          <button onClick={back} disabled={step === 1} className="rounded-2xl border border-slate-200 bg-white px-6 py-3 font-bold text-slate-600 disabled:cursor-not-allowed disabled:opacity-50">Back</button>
-          <button onClick={next} className="rounded-2xl bg-kantar-blue px-6 py-3 font-bold text-white shadow-card hover:bg-blue-700">Next Step</button>
+          <button
+            onClick={back}
+            disabled={step === 1}
+            className="rounded-2xl border border-slate-200 bg-white px-6 py-3 font-bold text-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Back
+          </button>
+          <button onClick={next} className="rounded-2xl bg-kantar-blue px-6 py-3 font-bold text-white shadow-card hover:bg-blue-700">
+            Next Step
+          </button>
         </div>
       )}
     </div>
