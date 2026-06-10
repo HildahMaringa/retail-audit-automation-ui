@@ -21,11 +21,10 @@ const steps = ['Query Family', 'Project', 'Action', 'Files & Settings', 'Review'
 const actions: ActionType[] = ['Run Queries', 'Correct Feedback', 'Merge Feedback']
 const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 
-const DEFAULT_API_BASE_URL = 'https://api-audit.jabariwater.co.ke'
+const DEFAULT_API_BASE_URL = 'https://retail-audit-automation-ui.vercel.app'
+const CHUNK_SIZE_BYTES = 512 * 1024
 
-const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL
-).replace(/\/$/, '')
+const API_BASE_URL = DEFAULT_API_BASE_URL.replace(/\/$/, '')
 
 type RunResult = {
   run_id: string
@@ -35,6 +34,20 @@ type RunResult = {
   download_url?: string
   status_url?: string
   error?: string
+}
+
+type UploadStartResult = {
+  upload_id: string
+  filename: string
+  total_chunks: number
+  status: string
+}
+
+type UploadCompleteResult = {
+  upload_id: string
+  filename: string
+  status: string
+  file_size: number
 }
 
 type FilePickerProps = {
@@ -154,6 +167,7 @@ export function NewRunPage() {
 
   const [isRunning, setIsRunning] = useState(false)
   const [runError, setRunError] = useState('')
+  const [uploadProgress, setUploadProgress] = useState('')
   const [runResult, setRunResult] = useState<RunResult | null>(null)
 
   const projects = useMemo(() => (family === 'Data Queries' ? dataQueryProjects : posCoolerProjects), [family])
@@ -184,8 +198,88 @@ export function NewRunPage() {
     }
   }
 
+  async function uploadFileInChunks(file: File, label: string) {
+    const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE_BYTES))
+
+    setUploadProgress(`Starting upload for ${label}: ${file.name}`)
+
+    const startFormData = new FormData()
+    startFormData.append('filename', file.name)
+    startFormData.append('total_chunks', String(totalChunks))
+
+    const startResponse = await fetch(buildApiUrl('/api/uploads/start'), {
+      method: 'POST',
+      body: startFormData,
+    })
+
+    const startResult = (await readResponseJson(startResponse)) as UploadStartResult
+
+    if (!startResponse.ok || !startResult.upload_id) {
+      throw new Error(
+        startResult.status || `Could not start upload for ${file.name}. HTTP ${startResponse.status}`,
+      )
+    }
+
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+      const chunkStart = chunkIndex * CHUNK_SIZE_BYTES
+      const chunkEnd = Math.min(file.size, chunkStart + CHUNK_SIZE_BYTES)
+      const chunkBlob = file.slice(chunkStart, chunkEnd)
+
+      setUploadProgress(
+        `Uploading ${label}: ${file.name} (${chunkIndex + 1}/${totalChunks})`,
+      )
+
+      const chunkFormData = new FormData()
+      chunkFormData.append('chunk_index', String(chunkIndex))
+      chunkFormData.append('chunk', chunkBlob, file.name)
+
+      const chunkResponse = await fetch(buildApiUrl(`/api/uploads/${startResult.upload_id}/chunk`), {
+        method: 'POST',
+        body: chunkFormData,
+      })
+
+      const chunkResult = await readResponseJson(chunkResponse)
+
+      if (!chunkResponse.ok) {
+        throw new Error(
+          chunkResult.message ||
+            chunkResult.detail ||
+            `Could not upload chunk ${chunkIndex + 1} for ${file.name}. HTTP ${chunkResponse.status}`,
+        )
+      }
+    }
+
+    setUploadProgress(`Finalizing upload for ${label}: ${file.name}`)
+
+    const completeResponse = await fetch(buildApiUrl(`/api/uploads/${startResult.upload_id}/complete`), {
+      method: 'POST',
+    })
+
+    const completeResult = (await readResponseJson(completeResponse)) as UploadCompleteResult
+
+    if (!completeResponse.ok || completeResult.status !== 'complete') {
+      throw new Error(
+        completeResult.status || `Could not complete upload for ${file.name}. HTTP ${completeResponse.status}`,
+      )
+    }
+
+    return completeResult.upload_id
+  }
+
+  async function uploadFilesInChunks(files: File[], label: string) {
+    const uploadIds: string[] = []
+
+    for (let index = 0; index < files.length; index += 1) {
+      const uploadId = await uploadFileInChunks(files[index], `${label} ${index + 1}`)
+      uploadIds.push(uploadId)
+    }
+
+    return uploadIds
+  }
+
   async function handleRunProcess() {
     setRunError('')
+    setUploadProgress('')
     setRunResult(null)
 
     if (action === 'Merge Feedback') {
@@ -213,6 +307,28 @@ export function NewRunPage() {
     try {
       setIsRunning(true)
 
+      let uploadedDataFileId = ''
+      let uploadedFeedbackFileId = ''
+      let uploadedQueryFileIds: string[] = []
+      let uploadedFeedbackFileIds: string[] = []
+
+      if (action === 'Merge Feedback') {
+        uploadedQueryFileIds = await uploadFilesInChunks(queryFiles, 'query file')
+        uploadedFeedbackFileIds = await uploadFilesInChunks(feedbackFiles, 'feedback file')
+      } else {
+        if (dataFile) {
+          uploadedDataFileId = await uploadFileInChunks(dataFile, 'data workbook')
+        }
+
+        const optionalFeedbackFile = action === 'Correct Feedback' ? feedbackFile : previousFeedbackFile
+
+        if (optionalFeedbackFile) {
+          uploadedFeedbackFileId = await uploadFileInChunks(optionalFeedbackFile, 'feedback workbook')
+        }
+      }
+
+      setUploadProgress('Starting backend processing...')
+
       const formData = new FormData()
       formData.append('query_family', family)
       formData.append('project', project)
@@ -222,22 +338,13 @@ export function NewRunPage() {
       formData.append('batch', batch.replace(/batch/i, '').trim() || batch)
 
       if (action === 'Merge Feedback') {
-        queryFiles.forEach((file) => {
-          formData.append('query_files', file)
-        })
-
-        feedbackFiles.forEach((file) => {
-          formData.append('feedback_files', file)
-        })
+        formData.append('query_file_ids', JSON.stringify(uploadedQueryFileIds))
+        formData.append('feedback_file_ids', JSON.stringify(uploadedFeedbackFileIds))
       } else {
-        if (dataFile) {
-          formData.append('data_file', dataFile)
-        }
+        formData.append('data_file_id', uploadedDataFileId)
 
-        const optionalFeedbackFile = action === 'Correct Feedback' ? feedbackFile : previousFeedbackFile
-
-        if (optionalFeedbackFile) {
-          formData.append('feedback_file', optionalFeedbackFile)
+        if (uploadedFeedbackFileId) {
+          formData.append('feedback_file_id', uploadedFeedbackFileId)
         }
       }
 
@@ -298,6 +405,7 @@ export function NewRunPage() {
       setRunError(message)
     } finally {
       setIsRunning(false)
+      setUploadProgress('')
     }
   }
 
@@ -309,6 +417,7 @@ export function NewRunPage() {
   function startNewRun() {
     setStep(1)
     setRunError('')
+    setUploadProgress('')
     setRunResult(null)
     setDataFile(null)
     setPreviousFeedbackFile(null)
@@ -583,7 +692,7 @@ export function NewRunPage() {
               className="mt-6 flex w-full items-center justify-center gap-3 rounded-3xl bg-kantar-blue px-6 py-5 text-lg font-black text-white shadow-card hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {isRunning ? <Loader2 className="h-6 w-6 animate-spin" /> : <Play className="h-6 w-6" />}
-              {isRunning ? 'Processing... This may take several minutes. Please keep this page open.' : 'Run Process'}
+              {isRunning ? uploadProgress || 'Processing... This may take several minutes. Please keep this page open.' : 'Run Process'}
             </button>
           </section>
         )}
