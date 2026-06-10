@@ -21,7 +21,9 @@ const steps = ['Query Family', 'Project', 'Action', 'Files & Settings', 'Review'
 const actions: ActionType[] = ['Run Queries', 'Correct Feedback', 'Merge Feedback']
 const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const DEFAULT_API_BASE_URL = 'https://retail-audit-automation-ui.vercel.app'
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/$/, '')
 
 type RunResult = {
   run_id: string
@@ -41,6 +43,14 @@ type FilePickerProps = {
   multiple?: boolean
   onChange?: (file: File | null) => void
   onMultipleChange?: (files: File[]) => void
+}
+
+function buildApiUrl(path: string) {
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path
+  }
+
+  return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
 }
 
 function FilePicker({
@@ -156,6 +166,22 @@ export function NewRunPage() {
     setStep((current) => Math.max(1, current - 1))
   }
 
+  async function readResponseJson(response: Response) {
+    const text = await response.text()
+
+    if (!text) {
+      return {}
+    }
+
+    try {
+      return JSON.parse(text)
+    } catch {
+      return {
+        message: text,
+      }
+    }
+  }
+
   async function handleRunProcess() {
     setRunError('')
     setRunResult(null)
@@ -213,15 +239,15 @@ export function NewRunPage() {
         }
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/runs`, {
+      const response = await fetch(buildApiUrl('/api/runs'), {
         method: 'POST',
         body: formData,
       })
 
-      const initialResult: RunResult = await response.json()
+      const initialResult = (await readResponseJson(response)) as RunResult
 
       if (!response.ok || initialResult.status === 'error' || initialResult.status === 'failed') {
-        throw new Error(initialResult.message || initialResult.error || 'The backend failed to start this run.')
+        throw new Error(initialResult.message || initialResult.error || `The backend failed to start this run. HTTP ${response.status}`)
       }
 
       if (!initialResult.run_id) {
@@ -229,18 +255,18 @@ export function NewRunPage() {
       }
 
       const statusUrl = initialResult.status_url || `/api/runs/${initialResult.run_id}/status`
-      const maxAttempts = 240 // 20 minutes total because 240 * 5 seconds = 20 minutes
+      const maxAttempts = 720 // 60 minutes total because 720 * 5 seconds = 60 minutes
 
       let completedResult: RunResult | null = null
 
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 5000))
 
-        const statusResponse = await fetch(`${API_BASE_URL}${statusUrl}`)
-        const statusResult: RunResult = await statusResponse.json()
+        const statusResponse = await fetch(buildApiUrl(statusUrl))
+        const statusResult = (await readResponseJson(statusResponse)) as RunResult
 
         if (!statusResponse.ok) {
-          throw new Error(statusResult.message || 'Could not check run status.')
+          throw new Error(statusResult.message || `Could not check run status. HTTP ${statusResponse.status}`)
         }
 
         if (statusResult.status === 'success') {
@@ -260,7 +286,13 @@ export function NewRunPage() {
       setRunResult(completedResult)
       setStep(6)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Something went wrong while running the process.'
+      const message =
+        error instanceof TypeError
+          ? `Failed to connect to the backend. The app tried to use: ${API_BASE_URL}. Please confirm the backend is reachable.`
+          : error instanceof Error
+            ? error.message
+            : 'Something went wrong while running the process.'
+
       setRunError(message)
     } finally {
       setIsRunning(false)
@@ -269,7 +301,7 @@ export function NewRunPage() {
 
   function handleDownload() {
     if (!runResult?.download_url) return
-    window.location.href = `${API_BASE_URL}${runResult.download_url}`
+    window.location.href = buildApiUrl(runResult.download_url)
   }
 
   function startNewRun() {
@@ -549,7 +581,7 @@ export function NewRunPage() {
               className="mt-6 flex w-full items-center justify-center gap-3 rounded-3xl bg-kantar-blue px-6 py-5 text-lg font-black text-white shadow-card hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {isRunning ? <Loader2 className="h-6 w-6 animate-spin" /> : <Play className="h-6 w-6" />}
-              {isRunning ? 'Processing... This may take a few minutes' : 'Run Process'}
+              {isRunning ? 'Processing... This may take several minutes. Please keep this page open.' : 'Run Process'}
             </button>
           </section>
         )}
