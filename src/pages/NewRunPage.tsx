@@ -22,7 +22,7 @@ const actions: ActionType[] = ['Run Queries', 'Correct Feedback', 'Merge Feedbac
 const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 
 const DEFAULT_API_BASE_URL = 'https://retail-audit-automation-ui.vercel.app'
-const CHUNK_SIZE_BYTES = 256 * 1024
+const CHUNK_SIZE_BYTES = 512 * 1024
 
 const API_BASE_URL = DEFAULT_API_BASE_URL.replace(/\/$/, '')
 
@@ -233,19 +233,47 @@ export function NewRunPage() {
       chunkFormData.append('chunk_index', String(chunkIndex))
       chunkFormData.append('chunk', chunkBlob, file.name)
 
-      const chunkResponse = await fetch(buildApiUrl(`/api/uploads/${startResult.upload_id}/chunk`), {
-        method: 'POST',
-        body: chunkFormData,
-      })
+      let chunkUploaded = false
+      let lastChunkError = ''
 
-      const chunkResult = await readResponseJson(chunkResponse)
+      for (let attempt = 1; attempt <= 4; attempt += 1) {
+        try {
+          if (attempt > 1) {
+            setUploadProgress(
+              `Retrying ${label}: ${file.name} chunk ${chunkIndex + 1}/${totalChunks} - attempt ${attempt}/4`,
+            )
 
-      if (!chunkResponse.ok) {
-        throw new Error(
-          chunkResult.message ||
-            chunkResult.detail ||
-            `Could not upload chunk ${chunkIndex + 1} for ${file.name}. HTTP ${chunkResponse.status}`,
-        )
+            await new Promise((resolve) => setTimeout(resolve, attempt * 2500))
+          }
+
+          const chunkResponse = await fetch(buildApiUrl(`/api/uploads/${startResult.upload_id}/chunk`), {
+            method: 'POST',
+            body: chunkFormData,
+          })
+
+          const chunkResult = await readResponseJson(chunkResponse)
+
+          if (!chunkResponse.ok) {
+            lastChunkError =
+              chunkResult.message ||
+              chunkResult.detail ||
+              `Could not upload chunk ${chunkIndex + 1} for ${file.name}. HTTP ${chunkResponse.status}`
+
+            continue
+          }
+
+          chunkUploaded = true
+          break
+        } catch (error) {
+          lastChunkError =
+            error instanceof Error
+              ? error.message
+              : `Could not upload chunk ${chunkIndex + 1} for ${file.name}.`
+        }
+      }
+
+      if (!chunkUploaded) {
+        throw new Error(lastChunkError || `Could not upload chunk ${chunkIndex + 1} for ${file.name}.`)
       }
     }
 
