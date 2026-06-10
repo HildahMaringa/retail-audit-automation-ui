@@ -21,9 +21,11 @@ const steps = ['Query Family', 'Project', 'Action', 'Files & Settings', 'Review'
 const actions: ActionType[] = ['Run Queries', 'Correct Feedback', 'Merge Feedback']
 const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 
-const DEFAULT_API_BASE_URL = 'https://retail-audit-automation-ui.vercel.app'
+const DEFAULT_API_BASE_URL = 'https://api-audit.jabariwater.co.ke'
 
-const API_BASE_URL = DEFAULT_API_BASE_URL.replace(/\/$/, '')
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL
+).replace(/\/$/, '')
 
 type RunResult = {
   run_id: string
