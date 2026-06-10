@@ -22,7 +22,7 @@ const actions: ActionType[] = ['Run Queries', 'Correct Feedback', 'Merge Feedbac
 const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 
 const DEFAULT_API_BASE_URL = 'https://retail-audit-automation-ui.vercel.app'
-const CHUNK_SIZE_BYTES = 512 * 1024
+const CHUNK_SIZE_BYTES = 256 * 1024
 
 const API_BASE_URL = DEFAULT_API_BASE_URL.replace(/\/$/, '')
 
