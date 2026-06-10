@@ -23,7 +23,7 @@ const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 
 const DEFAULT_API_BASE_URL = 'https://retail-audit-automation-ui.vercel.app'
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/$/, '')
+const API_BASE_URL = DEFAULT_API_BASE_URL.replace(/\/$/, '')
 
 type RunResult = {
   run_id: string
