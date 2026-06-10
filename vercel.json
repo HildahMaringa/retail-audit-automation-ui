@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://api-audit.jabariwater.co.ke/api/:path*"
+    }
+  ]
+}
